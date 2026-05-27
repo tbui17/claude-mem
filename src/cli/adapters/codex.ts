@@ -46,7 +46,8 @@ function cloneToolInput(toolInput: unknown): unknown {
 function buildBaseOutput(result: HookResult): Record<string, unknown> {
   const output: Record<string, unknown> = {};
   if (result.continue !== undefined) output.continue = result.continue;
-  if (result.suppressOutput !== undefined) output.suppressOutput = result.suppressOutput;
+  // Codex rejects suppressOutput for tool hooks; skip/fallback results often
+  // lack the hook event, so never emit it from this adapter.
   if (result.systemMessage) output.systemMessage = result.systemMessage;
   if (result.decision === 'block') output.decision = 'block';
   if (result.reason) output.reason = result.reason;

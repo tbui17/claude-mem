@@ -426,6 +426,13 @@ async function buildHooks() {
       if (!validCodexHookEvents.has(eventName)) {
         throw new Error(`plugin/hooks/codex-hooks.json contains unknown Codex hook event: ${eventName}`);
       }
+      for (const matcher of codexHooks.hooks[eventName] ?? []) {
+        for (const hook of matcher.hooks ?? []) {
+          if (hook.type === 'command' && !String(hook.commandWindows ?? '').trim()) {
+            throw new Error(`plugin/hooks/codex-hooks.json ${eventName} command hook is missing commandWindows`);
+          }
+        }
+      }
     }
     const codexMarketplace = JSON.parse(fs.readFileSync('.agents/plugins/marketplace.json', 'utf-8'));
     const claudeMemMarketplaceEntry = (codexMarketplace.plugins ?? []).find((plugin) => plugin.name === 'claude-mem');

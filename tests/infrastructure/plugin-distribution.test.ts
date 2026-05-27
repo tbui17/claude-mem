@@ -10,15 +10,28 @@ function readJson(relativePath: string): any {
   return JSON.parse(readFileSync(path.join(projectRoot, relativePath), 'utf-8'));
 }
 
-function commandHooksFrom(relativePath: string): string[] {
+function commandHookObjectsFrom(relativePath: string): any[] {
   const parsed = readJson(relativePath);
   return Object.values(parsed.hooks ?? {}).flatMap((matchers: any) =>
     matchers.flatMap((matcher: any) =>
-      (matcher.hooks ?? [])
-        .filter((hook: any) => hook.type === 'command')
-        .map((hook: any) => String(hook.command ?? ''))
+      (matcher.hooks ?? []).filter((hook: any) => hook.type === 'command')
     )
   );
+}
+
+function commandHooksFrom(relativePath: string): string[] {
+  return commandHookObjectsFrom(relativePath).map((hook: any) => String(hook.command ?? ''));
+}
+
+function codexCommandHooksFor(eventName: string): any[] {
+  const parsed = readJson('plugin/hooks/codex-hooks.json');
+  return (parsed.hooks?.[eventName] ?? []).flatMap((matcher: any) =>
+    (matcher.hooks ?? []).filter((hook: any) => hook.type === 'command')
+  );
+}
+
+function isPowerShellCommand(command: string): boolean {
+  return command.includes('$env:CLAUDE_CONFIG_DIR') || command.includes('Join-Path');
 }
 
 function mcpStartupCommandFrom(relativePath: string): string {
@@ -108,19 +121,35 @@ describe('Plugin Distribution - hooks.json Integrity', () => {
 
   it('should include CLAUDE_PLUGIN_ROOT fallback in all hook commands (#1215)', () => {
     const expectedFallbackPath = '$_C/plugins/marketplaces/thedotmack/plugin';
+    const expectedPowerShellFallbackPath = "plugins\\marketplaces\\thedotmack\\plugin";
 
     for (const command of commandHooksFrom('plugin/hooks/hooks.json')) {
-      expect(command).toContain(expectedFallbackPath);
+      if (isPowerShellCommand(command)) {
+        expect(command).toContain('$env:CLAUDE_PLUGIN_ROOT');
+        expect(command).toContain(expectedPowerShellFallbackPath);
+      } else {
+        expect(command).toContain(expectedFallbackPath);
+      }
     }
   });
 
   it('should try cache path before marketplaces fallback in all hook commands (#1533)', () => {
     const cachePath = '$_C/plugins/cache/thedotmack/claude-mem';
     const marketplacesPath = '$_C/plugins/marketplaces/thedotmack/plugin';
+    const powerShellCachePath = "plugins\\cache\\thedotmack\\claude-mem";
+    const powerShellMarketplacesPath = "plugins\\marketplaces\\thedotmack\\plugin";
 
     for (const command of commandHooksFrom('plugin/hooks/hooks.json')) {
-      expect(command).toContain(cachePath);
-      expect(command.indexOf(cachePath)).toBeLessThan(command.indexOf(marketplacesPath));
+      if (isPowerShellCommand(command)) {
+        expect(command).toContain(powerShellCachePath);
+        expect(command).toContain(powerShellMarketplacesPath);
+        expect(command.indexOf(powerShellCachePath)).toBeLessThan(
+          command.indexOf(powerShellMarketplacesPath)
+        );
+      } else {
+        expect(command).toContain(cachePath);
+        expect(command.indexOf(cachePath)).toBeLessThan(command.indexOf(marketplacesPath));
+      }
     }
   });
 });
@@ -158,14 +187,82 @@ describe('Plugin Distribution - Startup Root Resolution', () => {
     }
   });
 
+  it('Codex command hooks should include PowerShell-safe Windows overrides', () => {
+    const requiredMarkers = [
+      '$env:CLAUDE_CONFIG_DIR',
+      'Join-Path',
+      'Test-Path',
+      'Get-ChildItem',
+      '& node',
+    ];
+    const forbiddenFragments = [
+      'printenv',
+      'export PATH=',
+      'while IFS=',
+      '$(',
+      'command -v cygpath',
+    ];
+
+    for (const hook of commandHookObjectsFrom('plugin/hooks/codex-hooks.json')) {
+      const commandWindows = String(hook.commandWindows ?? '');
+
+      expect(commandWindows.trim().length).toBeGreaterThan(0);
+      for (const marker of requiredMarkers) {
+        expect(commandWindows).toContain(marker);
+      }
+      for (const fragment of forbiddenFragments) {
+        expect(commandWindows).not.toContain(fragment);
+      }
+    }
+  });
+
+  it('Codex Windows overrides should call the expected hook actions', () => {
+    expect(
+      codexCommandHooksFor('UserPromptSubmit').some((hook) =>
+        String(hook.commandWindows ?? '').includes('hook codex session-init')
+      )
+    ).toBe(true);
+    expect(
+      codexCommandHooksFor('PreToolUse').some((hook) =>
+        String(hook.commandWindows ?? '').includes('hook codex file-context')
+      )
+    ).toBe(true);
+    expect(
+      codexCommandHooksFor('PostToolUse').some((hook) =>
+        String(hook.commandWindows ?? '').includes('hook codex observation')
+      )
+    ).toBe(true);
+  });
+
+  it('Codex SessionStart worker start should not emit generic worker JSON on success', () => {
+    const sessionStartCommands = codexCommandHooksFor('SessionStart');
+    const startHook = sessionStartCommands.find((hook) =>
+      String(hook.command ?? '').includes('worker-service.cjs" start')
+    );
+
+    expect(startHook).toBeDefined();
+    expect(String(startHook?.command ?? '')).toContain('start >/dev/null');
+    expect(String(startHook?.commandWindows ?? '')).toContain('$startOutput = & node $runner $worker start');
+    expect(String(startHook?.commandWindows ?? '')).toContain('if ($startExit -ne 0)');
+    expect(String(startHook?.commandWindows ?? '')).toContain('exit 0');
+  });
+
   it('Claude hook commands should have config-dir based non-empty fallbacks', () => {
     for (const command of commandHooksFrom('plugin/hooks/hooks.json')) {
-      expect(command).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
-      expect(command).toContain('while IFS= read -r _R');
-      expect(command).toContain('$_C/plugins/marketplaces/thedotmack/plugin');
-      expect(command).toContain('$_C/plugins/cache/thedotmack/claude-mem');
-      expect(command).toContain('[ -f "$_Q/scripts/');
-      expect(command).not.toContain('$HOME/.claude/plugins/');
+      if (isPowerShellCommand(command)) {
+        expect(command).toContain('$env:CLAUDE_CONFIG_DIR');
+        expect(command).toContain("Join-Path $claudeConfig 'plugins\\marketplaces\\thedotmack\\plugin'");
+        expect(command).toContain("Join-Path $claudeConfig 'plugins\\cache\\thedotmack\\claude-mem'");
+        expect(command).toContain('Test-Path');
+        expect(command).not.toContain('$HOME\\.claude\\plugins\\');
+      } else {
+        expect(command).toContain('${CLAUDE_CONFIG_DIR:-$HOME/.claude}');
+        expect(command).toContain('while IFS= read -r _R');
+        expect(command).toContain('$_C/plugins/marketplaces/thedotmack/plugin');
+        expect(command).toContain('$_C/plugins/cache/thedotmack/claude-mem');
+        expect(command).toContain('[ -f "$_Q/scripts/');
+        expect(command).not.toContain('$HOME/.claude/plugins/');
+      }
     }
   });
 });

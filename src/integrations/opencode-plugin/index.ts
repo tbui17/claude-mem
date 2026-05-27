@@ -1,5 +1,5 @@
 import { z } from "zod";
-
+import { ensureWorkerReady, resolveWorkerPort, type WorkerHealth } from "./worker-manager";
 interface OpenCodeProject {
   name?: string;
   path?: string;
@@ -57,18 +57,30 @@ interface OpenCodeEventInput {
   };
 }
 
-function resolveWorkerPort(): string {
-  const fromEnv = process.env.CLAUDE_MEM_WORKER_PORT;
-  const parsed = fromEnv ? Number.parseInt(fromEnv.trim(), 10) : NaN;
-  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535) {
-    return String(parsed);
+let _worker: WorkerHealth | null = null;
+let _workerInitPromise: Promise<WorkerHealth | null> | null = null;
+
+/**
+ * Lazy worker init — discovers or starts the worker, caches the result.
+ * First call may spawn a new worker process or kill zombie sockets.
+ */
+function ensureWorkerInitialized(): Promise<WorkerHealth | null> {
+  if (_workerInitPromise === null) {
+    _workerInitPromise = ensureWorkerReady().then((w) => {
+      _worker = w;
+      return w;
+    });
   }
-  const uid = typeof process.getuid === "function" ? process.getuid() : 77;
-  return String(37700 + (uid % 100));
+  return _workerInitPromise;
 }
 
-const WORKER_BASE_URL = `http://127.0.0.1:${resolveWorkerPort()}`;
+function workerBaseUrl(): string {
+  const port = _worker?.port ?? resolveWorkerPort();
+  return `http://127.0.0.1:${port}`;
+}
+
 const MAX_TOOL_RESPONSE_LENGTH = 1000;
+
 const MAX_SESSION_MAP_ENTRIES = 1000;
 const JSON_HEADERS: Record<string, string> = { "Content-Type": "application/json" };
 
@@ -76,21 +88,25 @@ function workerPostFireAndForget(
   path: string,
   body: Record<string, unknown>,
 ): void {
-  fetch(`${WORKER_BASE_URL}${path}`, {
+  console.log(`[claude-mem] POST ${path} → ${workerBaseUrl()}${path}`);
+  fetch(`${workerBaseUrl()}${path}`, {
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
+  })
+    .then((response) => {
+      console.log(`[claude-mem] POST ${path} → ${response.status} ${response.statusText}`);
   }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("ECONNREFUSED")) {
-      console.warn(`[claude-mem] Worker POST ${path} failed: ${message}`);
-    }
-  });
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("ECONNREFUSED")) {
+        console.warn(`[claude-mem] Worker POST ${path} failed: ${message}`);
+      }
+    });
 }
 
 async function workerGetText(path: string): Promise<string | null> {
   try {
-    const response = await fetch(`${WORKER_BASE_URL}${path}`, { headers: JSON_HEADERS });
+    const response = await fetch(`${workerBaseUrl()}${path}`, { headers: JSON_HEADERS });
     if (!response.ok) {
       console.warn(`[claude-mem] Worker GET ${path} returned ${response.status}`);
       return null;
@@ -161,6 +177,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
       input: ToolExecuteAfterInput,
       output: ToolExecuteAfterOutput,
     ): Promise<void> => {
+      console.log(`[claude-mem] tool.execute.after called: tool=${input?.tool}, sessionID=${input?.sessionID}`);
       // Without this guard a sessionless tool call would key the session map
       // on the literal string "undefined" and collapse every sessionless
       // observation into one phantom `opencode-undefined-<ts>` session
@@ -203,6 +220,9 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
         case "session.created": {
           const sid = (props.info as { id?: string } | undefined)?.id;
           if (sid) ensureSessionInitialized(sid);
+          // Proactive worker init — triggers recovery/startup in background
+          // so it's ready before the first search or observation
+          ensureWorkerInitialized();
           break;
         }
 
@@ -268,6 +288,8 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
             return "claude-mem worker is not running. Start it with: npx claude-mem start";
           }
 
+          // Worker returns MCP-formatted responses: { content: [{ type: "text", text: "..." }] }
+          // Parse the text content directly instead of looking for data.items.
           let data: any;
           try {
             data = JSON.parse(text);
@@ -275,20 +297,20 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
             console.warn('[claude-mem] Failed to parse search results:', error instanceof Error ? error.message : String(error));
             return "Failed to parse search results.";
           }
-
-          const items = Array.isArray(data.items) ? data.items : [];
-          if (items.length === 0) {
-            return `No results found for "${query}".`;
+          let responseText: string;
+          if (data.content && Array.isArray(data.content) && data.content.length > 0) {
+            const firstContent = data.content[0];
+            responseText = typeof firstContent?.text === "string" ? firstContent.text : "";
+          } else if (typeof data.text === "string") {
+            responseText = data.text;
+          } else {
+            responseText = JSON.stringify(data);
           }
 
-          return items
-            .slice(0, 10)
-            .map((item: Record<string, unknown>, index: number) => {
-              const title = String(item.title || item.subtitle || "Untitled");
-              const project = item.project ? ` [${String(item.project)}]` : "";
-              return `${index + 1}. ${title}${project}`;
-            })
-            .join("\n");
+          if (!responseText || responseText.includes("No observations found")) {
+            return `No results found for "${query}".`;
+          }
+          return responseText;
         },
       } satisfies ToolDefinition,
     },

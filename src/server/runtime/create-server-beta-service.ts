@@ -240,6 +240,34 @@ function buildServerGenerationProviderFromEnv(): ServerGenerationProvider | null
       if (process.env.CLAUDE_MEM_SERVER_MODEL) opts.model = process.env.CLAUDE_MEM_SERVER_MODEL;
       return new OpenRouterObservationProvider(opts);
     }
+    if (provider === 'openai-compatible') {
+      const apiKey = process.env.CLAUDE_MEM_OPENAI_COMPAT_API_KEY ?? '';
+      const baseUrl = process.env.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL ?? '';
+      if (!apiKey || !baseUrl) return null;
+      const opts: ConstructorParameters<typeof OpenRouterObservationProvider>[0] = {
+        apiKey,
+        baseUrl,
+        providerLabel: 'openai-compatible',
+        providerDisplayName: process.env.CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME || 'OpenAI-compatible provider',
+      };
+      opts.model = process.env.CLAUDE_MEM_SERVER_MODEL || process.env.CLAUDE_MEM_OPENAI_COMPAT_MODEL || '';
+      if (!opts.model) return null;
+      if (process.env.CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON) {
+        opts.headers = JSON.parse(process.env.CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON);
+      }
+      return new OpenRouterObservationProvider(opts);
+    }
+    if (provider === 'opencode-go') {
+      const apiKey = process.env.OPENCODE_GO_API_KEY ?? process.env.CLAUDE_MEM_OPENCODE_GO_API_KEY ?? '';
+      if (!apiKey) return null;
+      return new OpenRouterObservationProvider({
+        apiKey,
+        baseUrl: process.env.CLAUDE_MEM_OPENCODE_GO_BASE_URL || 'https://opencode.ai/zen/go/v1',
+        model: process.env.CLAUDE_MEM_SERVER_MODEL || process.env.CLAUDE_MEM_OPENCODE_GO_MODEL || 'deepseek-v4-flash',
+        providerLabel: 'opencode-go',
+        providerDisplayName: 'OpenCode Go',
+      });
+    }
   } catch {
     return null;
   }

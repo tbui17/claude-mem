@@ -12,7 +12,7 @@ import type {
   ServerGenerationResult,
 } from './shared/types.js';
 
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_MODEL = 'anthropic/claude-3.5-sonnet';
 
 export interface OpenRouterObservationProviderOptions {
@@ -21,6 +21,10 @@ export interface OpenRouterObservationProviderOptions {
   maxOutputTokens?: number;
   siteUrl?: string;
   appName?: string;
+  baseUrl?: string;
+  providerLabel?: 'openrouter' | 'openai-compatible' | 'opencode-go';
+  providerDisplayName?: string;
+  headers?: Record<string, string>;
   fetchImpl?: typeof fetch;
 }
 
@@ -31,12 +35,15 @@ interface OpenRouterResponse {
 }
 
 export class OpenRouterObservationProvider implements ServerGenerationProvider {
-  readonly providerLabel = 'openrouter' as const;
+  readonly providerLabel: 'openrouter' | 'openai-compatible' | 'opencode-go';
   private readonly apiKey: string;
   private readonly model: string;
   private readonly maxOutputTokens: number;
   private readonly siteUrl: string;
   private readonly appName: string;
+  private readonly baseUrl: string;
+  private readonly providerDisplayName: string;
+  private readonly extraHeaders: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: OpenRouterObservationProviderOptions) {
@@ -51,6 +58,10 @@ export class OpenRouterObservationProvider implements ServerGenerationProvider {
     this.maxOutputTokens = options.maxOutputTokens ?? 4096;
     this.siteUrl = options.siteUrl ?? 'https://github.com/thedotmack/claude-mem';
     this.appName = options.appName ?? 'claude-mem';
+    this.baseUrl = options.baseUrl ?? OPENROUTER_BASE_URL;
+    this.providerLabel = options.providerLabel ?? 'openrouter';
+    this.providerDisplayName = options.providerDisplayName ?? 'OpenRouter';
+    this.extraHeaders = options.headers ?? {};
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -69,13 +80,14 @@ export class OpenRouterObservationProvider implements ServerGenerationProvider {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(OPENROUTER_API_URL, {
+      response = await this.fetchImpl(buildChatCompletionsUrl(this.baseUrl), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           'HTTP-Referer': this.siteUrl,
           'X-Title': this.appName,
           'Content-Type': 'application/json',
+          ...this.extraHeaders,
         },
         body: JSON.stringify({
           model: this.model,
@@ -88,7 +100,7 @@ export class OpenRouterObservationProvider implements ServerGenerationProvider {
     } catch (networkError) {
       throw classifyHttpProviderError({
         cause: networkError,
-        providerLabel: 'OpenRouter',
+        providerLabel: this.providerDisplayName,
       });
     }
 
@@ -98,8 +110,8 @@ export class OpenRouterObservationProvider implements ServerGenerationProvider {
         status: response.status,
         bodyText,
         headers: response.headers,
-        cause: new Error(`OpenRouter API error: ${response.status} - ${bodyText}`),
-        providerLabel: 'OpenRouter',
+        cause: new Error(`${this.providerDisplayName} API error: ${response.status} - ${bodyText}`),
+        providerLabel: this.providerDisplayName,
       });
     }
 
@@ -118,15 +130,15 @@ export class OpenRouterObservationProvider implements ServerGenerationProvider {
         status: response.status,
         bodyText: `${data.error.code ?? ''} ${data.error.message ?? ''}`,
         headers: response.headers,
-        cause: new Error(`OpenRouter API error: ${data.error.code} - ${data.error.message}`),
-        providerLabel: 'OpenRouter',
+        cause: new Error(`${this.providerDisplayName} API error: ${data.error.code} - ${data.error.message}`),
+        providerLabel: this.providerDisplayName,
       });
     }
 
     const rawText = data.choices?.[0]?.message?.content?.trim() ?? '';
     if (!rawText) {
-      logger.warn('SDK', 'OpenRouter returned empty content', {
-        provider: 'openrouter',
+      logger.warn('SDK', `${this.providerDisplayName} returned empty content`, {
+        provider: this.providerLabel,
         model: this.model,
       });
     }
@@ -148,4 +160,12 @@ async function safeReadBody(response: Response): Promise<string> {
   } catch {
     return '';
   }
+}
+
+function buildChatCompletionsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  if (trimmed.endsWith('/chat/completions')) {
+    return trimmed;
+  }
+  return `${trimmed}/chat/completions`;
 }

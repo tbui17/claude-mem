@@ -71,7 +71,14 @@ import { SSEBroadcaster } from './worker/SSEBroadcaster.js';
 import { ClaudeProvider, classifyClaudeError } from './worker/ClaudeProvider.js';
 import type { WorkerRef } from './worker/agents/types.js';
 import { GeminiProvider, classifyGeminiError, isGeminiSelected, isGeminiAvailable } from './worker/GeminiProvider.js';
-import { OpenRouterProvider, classifyOpenRouterError, isOpenRouterSelected, isOpenRouterAvailable } from './worker/OpenRouterProvider.js';
+import {
+  OpenRouterProvider,
+  classifyOpenAICompatibleError,
+  getSelectedOpenAICompatibleConfig,
+  isOpenAICompatibleAvailable,
+  isOpenAICompatibleSelected,
+  isOpenRouterAvailable,
+} from './worker/OpenRouterProvider.js';
 import { ClassifiedProviderError, isClassified, type ProviderErrorClass } from './worker/provider-errors.js';
 import { PaginationHelper } from './worker/PaginationHelper.js';
 import { SettingsManager } from './worker/SettingsManager.js';
@@ -192,7 +199,7 @@ export class WorkerService implements WorkerRef {
       workerPath: __filename,
       getAiStatus: () => {
         let provider = 'claude';
-        if (isOpenRouterSelected() && isOpenRouterAvailable()) provider = 'openrouter';
+        if (isOpenAICompatibleSelected() && isOpenAICompatibleAvailable()) provider = getSelectedOpenAICompatibleConfig().providerId;
         else if (isGeminiSelected() && isGeminiAvailable()) provider = 'gemini';
         return {
           provider,
@@ -517,7 +524,7 @@ export class WorkerService implements WorkerRef {
   }
 
   private getActiveAgent(): ClaudeProvider | GeminiProvider | OpenRouterProvider {
-    if (isOpenRouterSelected() && isOpenRouterAvailable()) {
+    if (isOpenAICompatibleSelected() && isOpenAICompatibleAvailable()) {
       return this.openRouterAgent;
     }
     if (isGeminiSelected() && isGeminiAvailable()) {
@@ -548,7 +555,10 @@ export class WorkerService implements WorkerRef {
         return classifyGeminiError({ cause: error });
       }
       if (agent instanceof OpenRouterProvider) {
-        return classifyOpenRouterError({ cause: error });
+        return classifyOpenAICompatibleError({
+          cause: error,
+          providerName: getSelectedOpenAICompatibleConfig().providerName,
+        });
       }
     } catch {
       // If the classifier itself throws, fall back to unclassified.

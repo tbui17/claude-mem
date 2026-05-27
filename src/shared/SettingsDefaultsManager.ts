@@ -22,6 +22,16 @@ export interface SettingsDefaults {
   CLAUDE_MEM_OPENROUTER_APP_NAME: string;
   CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES: string;
   CLAUDE_MEM_OPENROUTER_MAX_TOKENS: string;
+  CLAUDE_MEM_OPENAI_COMPAT_API_KEY: string;
+  CLAUDE_MEM_OPENAI_COMPAT_BASE_URL: string;
+  CLAUDE_MEM_OPENAI_COMPAT_MODEL: string;
+  CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME: string;
+  CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON: string;
+  CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES: string;
+  CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS: string;
+  CLAUDE_MEM_OPENCODE_GO_API_KEY: string;
+  CLAUDE_MEM_OPENCODE_GO_BASE_URL: string;
+  CLAUDE_MEM_OPENCODE_GO_MODEL: string;
   CLAUDE_MEM_DATA_DIR: string;
   CLAUDE_MEM_LOG_LEVEL: string;
   CLAUDE_MEM_PYTHON_VERSION: string;
@@ -98,6 +108,16 @@ export class SettingsDefaultsManager {
     CLAUDE_MEM_OPENROUTER_APP_NAME: 'claude-mem',  // App name for OpenRouter analytics
     CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES: '20',  // Max messages in context window
     CLAUDE_MEM_OPENROUTER_MAX_TOKENS: '100000',  // Max estimated tokens (~100k safety limit)
+    CLAUDE_MEM_OPENAI_COMPAT_API_KEY: '',  // Generic OpenAI-compatible provider API key
+    CLAUDE_MEM_OPENAI_COMPAT_BASE_URL: '',  // Example: https://opencode.ai/zen/go/v1
+    CLAUDE_MEM_OPENAI_COMPAT_MODEL: '',  // Model ID for generic OpenAI-compatible providers
+    CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME: 'OpenAI-compatible provider',
+    CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON: '{}',  // Optional JSON object of extra headers
+    CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES: '20',
+    CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS: '100000',
+    CLAUDE_MEM_OPENCODE_GO_API_KEY: '',
+    CLAUDE_MEM_OPENCODE_GO_BASE_URL: 'https://opencode.ai/zen/go/v1',
+    CLAUDE_MEM_OPENCODE_GO_MODEL: 'deepseek-v4-flash',
     CLAUDE_MEM_DATA_DIR: join(homedir(), '.claude-mem'),
     CLAUDE_MEM_LOG_LEVEL: 'INFO',
     CLAUDE_MEM_PYTHON_VERSION: '3.13',

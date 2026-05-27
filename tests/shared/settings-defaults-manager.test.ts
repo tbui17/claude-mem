@@ -285,7 +285,7 @@ describe('SettingsDefaultsManager', () => {
 
   describe('get', () => {
     it('should return default value for key', () => {
-      expect(SettingsDefaultsManager.get('CLAUDE_MEM_MODEL')).toBe('claude-sonnet-4-6');
+      expect(SettingsDefaultsManager.get('CLAUDE_MEM_MODEL')).toBe('claude-haiku-4-5-20251001');
       const expectedPort = String(37700 + ((process.getuid?.() ?? 77) % 100));
       expect(SettingsDefaultsManager.get('CLAUDE_MEM_WORKER_PORT')).toBe(expectedPort);
     });
@@ -316,6 +316,9 @@ describe('SettingsDefaultsManager', () => {
       originalEnv.CLAUDE_MEM_WORKER_PORT = process.env.CLAUDE_MEM_WORKER_PORT;
       originalEnv.CLAUDE_MEM_MODEL = process.env.CLAUDE_MEM_MODEL;
       originalEnv.CLAUDE_MEM_LOG_LEVEL = process.env.CLAUDE_MEM_LOG_LEVEL;
+      originalEnv.CLAUDE_MEM_PROVIDER = process.env.CLAUDE_MEM_PROVIDER;
+      originalEnv.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL = process.env.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL;
+      originalEnv.CLAUDE_MEM_OPENCODE_GO_MODEL = process.env.CLAUDE_MEM_OPENCODE_GO_MODEL;
     });
 
     afterEach(() => {
@@ -333,6 +336,21 @@ describe('SettingsDefaultsManager', () => {
         delete process.env.CLAUDE_MEM_LOG_LEVEL;
       } else {
         process.env.CLAUDE_MEM_LOG_LEVEL = originalEnv.CLAUDE_MEM_LOG_LEVEL;
+      }
+      if (originalEnv.CLAUDE_MEM_PROVIDER === undefined) {
+        delete process.env.CLAUDE_MEM_PROVIDER;
+      } else {
+        process.env.CLAUDE_MEM_PROVIDER = originalEnv.CLAUDE_MEM_PROVIDER;
+      }
+      if (originalEnv.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL === undefined) {
+        delete process.env.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL;
+      } else {
+        process.env.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL = originalEnv.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL;
+      }
+      if (originalEnv.CLAUDE_MEM_OPENCODE_GO_MODEL === undefined) {
+        delete process.env.CLAUDE_MEM_OPENCODE_GO_MODEL;
+      } else {
+        process.env.CLAUDE_MEM_OPENCODE_GO_MODEL = originalEnv.CLAUDE_MEM_OPENCODE_GO_MODEL;
       }
     });
 
@@ -410,6 +428,20 @@ describe('SettingsDefaultsManager', () => {
       const expectedDefault = String(37700 + ((process.getuid?.() ?? 77) % 100));
       expect(defaults.CLAUDE_MEM_WORKER_PORT).toBe(expectedDefault); 
       expect(result.CLAUDE_MEM_WORKER_PORT).toBe('33333'); 
+    });
+
+    it('should include and override OpenAI-compatible provider defaults', () => {
+      process.env.CLAUDE_MEM_PROVIDER = 'opencode-go';
+      process.env.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL = 'https://example.test/v1';
+      process.env.CLAUDE_MEM_OPENCODE_GO_MODEL = 'deepseek-v4-flash';
+
+      const result = SettingsDefaultsManager.loadFromFile(settingsPath);
+
+      expect(result.CLAUDE_MEM_PROVIDER).toBe('opencode-go');
+      expect(result.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL).toBe('https://example.test/v1');
+      expect(result.CLAUDE_MEM_OPENCODE_GO_BASE_URL).toBe('https://opencode.ai/zen/go/v1');
+      expect(result.CLAUDE_MEM_OPENCODE_GO_MODEL).toBe('deepseek-v4-flash');
+      expect(result.CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON).toBe('{}');
     });
   });
 });

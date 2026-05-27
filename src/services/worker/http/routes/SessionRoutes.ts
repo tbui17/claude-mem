@@ -9,7 +9,14 @@ import { SessionManager } from '../../SessionManager.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
 import { ClaudeProvider } from '../../ClaudeProvider.js';
 import { GeminiProvider, isGeminiSelected, isGeminiAvailable } from '../../GeminiProvider.js';
-import { OpenRouterProvider, isOpenRouterSelected, isOpenRouterAvailable } from '../../OpenRouterProvider.js';
+import {
+  OpenRouterProvider,
+  getOpenAICompatibleApiKeyHint,
+  getSelectedOpenAICompatibleConfig,
+  isOpenAICompatibleAvailable,
+  isOpenAICompatibleSelected,
+  type OpenAICompatibleProviderId,
+} from '../../OpenRouterProvider.js';
 import type { WorkerService } from '../../../worker-service.js';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { SessionEventBroadcaster } from '../../events/SessionEventBroadcaster.js';
@@ -39,12 +46,13 @@ export class SessionRoutes extends BaseRouteHandler {
   }
 
   private getActiveAgent(): ClaudeProvider | GeminiProvider | OpenRouterProvider {
-    if (isOpenRouterSelected()) {
-      if (isOpenRouterAvailable()) {
-        logger.debug('SESSION', 'Using OpenRouter agent');
+    if (isOpenAICompatibleSelected()) {
+      const config = getSelectedOpenAICompatibleConfig();
+      if (isOpenAICompatibleAvailable()) {
+        logger.debug('SESSION', `Using ${config.providerName} agent`);
         return this.openRouterAgent;
       } else {
-        throw new Error('OpenRouter provider selected but no API key configured. Set CLAUDE_MEM_OPENROUTER_API_KEY in settings or OPENROUTER_API_KEY environment variable.');
+        throw new Error(`${config.providerName} provider selected but not fully configured. ${getOpenAICompatibleApiKeyHint(config.providerId)}`);
       }
     }
     if (isGeminiSelected()) {
@@ -58,9 +66,9 @@ export class SessionRoutes extends BaseRouteHandler {
     return this.sdkAgent;
   }
 
-  private getSelectedProvider(): 'claude' | 'gemini' | 'openrouter' {
-    if (isOpenRouterSelected() && isOpenRouterAvailable()) {
-      return 'openrouter';
+  private getSelectedProvider(): 'claude' | 'gemini' | OpenAICompatibleProviderId {
+    if (isOpenAICompatibleSelected() && isOpenAICompatibleAvailable()) {
+      return getSelectedOpenAICompatibleConfig().providerId;
     }
     return (isGeminiSelected() && isGeminiAvailable()) ? 'gemini' : 'claude';
   }
@@ -91,7 +99,7 @@ export class SessionRoutes extends BaseRouteHandler {
 
   private async startGeneratorWithProvider(
     session: ReturnType<typeof this.sessionManager.getSession>,
-    provider: 'claude' | 'gemini' | 'openrouter',
+    provider: 'claude' | 'gemini' | OpenAICompatibleProviderId,
     source: string
   ): Promise<void> {
     if (!session) return;
@@ -103,8 +111,9 @@ export class SessionRoutes extends BaseRouteHandler {
       session.abortController = new AbortController();
     }
 
-    const agent = provider === 'openrouter' ? this.openRouterAgent : (provider === 'gemini' ? this.geminiAgent : this.sdkAgent);
-    const agentName = provider === 'openrouter' ? 'OpenRouter' : (provider === 'gemini' ? 'Gemini' : 'Claude SDK');
+    const isOpenAICompatibleProvider = provider === 'openrouter' || provider === 'openai-compatible' || provider === 'opencode-go';
+    const agent = isOpenAICompatibleProvider ? this.openRouterAgent : (provider === 'gemini' ? this.geminiAgent : this.sdkAgent);
+    const agentName = isOpenAICompatibleProvider ? getSelectedOpenAICompatibleConfig().providerName : (provider === 'gemini' ? 'Gemini' : 'Claude SDK');
 
     const pendingStore = this.sessionManager.getPendingMessageStore();
     const actualQueueDepth = await pendingStore.getPendingCount(session.sessionDbId);

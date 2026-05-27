@@ -99,6 +99,16 @@ export class SettingsRoutes extends BaseRouteHandler {
       'CLAUDE_MEM_OPENROUTER_APP_NAME',
       'CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES',
       'CLAUDE_MEM_OPENROUTER_MAX_TOKENS',
+      'CLAUDE_MEM_OPENAI_COMPAT_API_KEY',
+      'CLAUDE_MEM_OPENAI_COMPAT_BASE_URL',
+      'CLAUDE_MEM_OPENAI_COMPAT_MODEL',
+      'CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME',
+      'CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON',
+      'CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES',
+      'CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS',
+      'CLAUDE_MEM_OPENCODE_GO_API_KEY',
+      'CLAUDE_MEM_OPENCODE_GO_BASE_URL',
+      'CLAUDE_MEM_OPENCODE_GO_MODEL',
       'CLAUDE_MEM_DATA_DIR',
       'CLAUDE_MEM_LOG_LEVEL',
       'CLAUDE_MEM_PYTHON_VERSION',
@@ -189,9 +199,9 @@ export class SettingsRoutes extends BaseRouteHandler {
 
   private validateSettings(settings: any): { valid: boolean; error?: string } {
     if (settings.CLAUDE_MEM_PROVIDER) {
-    const validProviders = ['claude', 'gemini', 'openrouter'];
-    if (!validProviders.includes(settings.CLAUDE_MEM_PROVIDER)) {
-      return { valid: false, error: 'CLAUDE_MEM_PROVIDER must be "claude", "gemini", or "openrouter"' };
+      const validProviders = ['claude', 'gemini', 'openrouter', 'openai-compatible', 'opencode-go'];
+      if (!validProviders.includes(settings.CLAUDE_MEM_PROVIDER)) {
+        return { valid: false, error: 'CLAUDE_MEM_PROVIDER must be "claude", "gemini", "openrouter", "openai-compatible", or "opencode-go"' };
       }
     }
 
@@ -314,6 +324,55 @@ export class SettingsRoutes extends BaseRouteHandler {
       } catch (error) {
         logger.debug('SETTINGS', 'Invalid URL format', { url: settings.CLAUDE_MEM_OPENROUTER_SITE_URL, error: error instanceof Error ? error.message : String(error) });
         return { valid: false, error: 'CLAUDE_MEM_OPENROUTER_SITE_URL must be a valid URL' };
+      }
+    }
+
+    if (settings.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL) {
+      try {
+        new URL(settings.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL);
+      } catch (error) {
+        logger.debug('SETTINGS', 'Invalid OpenAI-compatible base URL format', { url: settings.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL, error: error instanceof Error ? error.message : String(error) });
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPAT_BASE_URL must be a valid URL' };
+      }
+    }
+
+    if (settings.CLAUDE_MEM_OPENCODE_GO_BASE_URL) {
+      try {
+        new URL(settings.CLAUDE_MEM_OPENCODE_GO_BASE_URL);
+      } catch (error) {
+        logger.debug('SETTINGS', 'Invalid OpenCode Go base URL format', { url: settings.CLAUDE_MEM_OPENCODE_GO_BASE_URL, error: error instanceof Error ? error.message : String(error) });
+        return { valid: false, error: 'CLAUDE_MEM_OPENCODE_GO_BASE_URL must be a valid URL' };
+      }
+    }
+
+    if (settings.CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON) {
+      try {
+        const headers = JSON.parse(settings.CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON);
+        if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
+          return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON must be a JSON object' };
+        }
+        for (const value of Object.values(headers)) {
+          if (typeof value !== 'string') {
+            return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON values must be strings' };
+          }
+        }
+      } catch (error) {
+        logger.debug('SETTINGS', 'Invalid OpenAI-compatible headers JSON', { error: error instanceof Error ? error.message : String(error) });
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON must be valid JSON' };
+      }
+    }
+
+    if (settings.CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES) {
+      const count = parseInt(settings.CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES, 10);
+      if (isNaN(count) || count < 1 || count > 100) {
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES must be between 1 and 100' };
+      }
+    }
+
+    if (settings.CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS) {
+      const tokens = parseInt(settings.CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS, 10);
+      if (isNaN(tokens) || tokens < 1000 || tokens > 1000000) {
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS must be between 1000 and 1000000' };
       }
     }
 

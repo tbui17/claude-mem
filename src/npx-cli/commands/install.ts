@@ -615,7 +615,7 @@ function mergeSettings(updates: Record<string, string>): boolean {
   }
 }
 
-type ProviderId = 'claude' | 'gemini' | 'openrouter';
+type ProviderId = 'claude' | 'gemini' | 'openrouter' | 'openai-compatible' | 'opencode-go';
 type ClaudeAccessMode = 'subscription' | 'api-key';
 type ClaudeApiMode = 'direct' | 'gateway';
 type RuntimeId = 'worker' | 'server-beta';
@@ -826,7 +826,7 @@ async function promptProvider(options: InstallOptions): Promise<ProviderId> {
       }
       const wrote = mergeSettings({ CLAUDE_MEM_PROVIDER: options.provider });
       if (wrote) log.info(`Saved provider=${options.provider} to ~/.claude-mem/settings.json`);
-      log.warn(`Provider=${options.provider} requested non-interactively. API key prompt skipped — set CLAUDE_MEM_${options.provider.toUpperCase()}_API_KEY and CLAUDE_MEM_PROVIDER in settings.json or env manually if not already set.`);
+      log.warn(`Provider=${options.provider} requested non-interactively. API key prompt skipped — set the matching provider API key and CLAUDE_MEM_PROVIDER in settings.json or env manually if not already set.`);
       return options.provider;
     }
     return initialProvider;
@@ -886,6 +886,8 @@ async function promptProvider(options: InstallOptions): Promise<ProviderId> {
         { value: 'claude', label: 'Claude Agent SDK (recommended)' },
         { value: 'gemini', label: 'Gemini' },
         { value: 'openrouter', label: 'OpenRouter' },
+        { value: 'opencode-go', label: 'OpenCode Go' },
+        { value: 'openai-compatible', label: 'OpenAI-compatible endpoint' },
       ],
       initialValue: initialProvider,
     });
@@ -901,10 +903,16 @@ async function promptProvider(options: InstallOptions): Promise<ProviderId> {
     return 'claude';
   }
 
-  const providerLabel = selectedProvider === 'gemini' ? 'Gemini' : 'OpenRouter';
-  const keyEnvName = selectedProvider === 'gemini'
-    ? 'CLAUDE_MEM_GEMINI_API_KEY'
-    : 'CLAUDE_MEM_OPENROUTER_API_KEY';
+  const providerLabel =
+    selectedProvider === 'gemini' ? 'Gemini' :
+    selectedProvider === 'openrouter' ? 'OpenRouter' :
+    selectedProvider === 'opencode-go' ? 'OpenCode Go' :
+    'OpenAI-compatible endpoint';
+  const keyEnvName =
+    selectedProvider === 'gemini' ? 'CLAUDE_MEM_GEMINI_API_KEY' :
+    selectedProvider === 'openrouter' ? 'CLAUDE_MEM_OPENROUTER_API_KEY' :
+    selectedProvider === 'opencode-go' ? 'CLAUDE_MEM_OPENCODE_GO_API_KEY' :
+    'CLAUDE_MEM_OPENAI_COMPAT_API_KEY';
 
   const existingKey = getSetting(keyEnvName as keyof SettingsDefaults) as string | undefined;
   if (existingKey && existingKey.trim().length > 0) {
@@ -1015,7 +1023,7 @@ async function promptClaudeModel(options: InstallOptions): Promise<void> {
 
 export interface InstallOptions {
   ide?: string;
-  provider?: 'claude' | 'gemini' | 'openrouter';
+  provider?: ProviderId;
   model?: string;
   noAutoStart?: boolean;
 }

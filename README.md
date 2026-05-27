@@ -301,7 +301,7 @@ Make sure Node.js and npm are installed and added to your PATH. Download the lat
 
 ## Configuration
 
-Settings are managed in `~/.claude-mem/settings.json` (auto-created with defaults on first run). Configure AI model, worker port, data directory, log level, and context injection settings.
+Settings are managed in `~/.claude-mem/settings.json` (auto-created with defaults on first run). Configure AI model/provider, worker port, data directory, log level, and context injection settings. Supported observation providers are Claude, Gemini, OpenRouter, OpenCode Go, and generic OpenAI-compatible chat completions endpoints.
 
 See the **[Configuration Guide](https://docs.claude-mem.ai/configuration)** for all available settings and examples.
 

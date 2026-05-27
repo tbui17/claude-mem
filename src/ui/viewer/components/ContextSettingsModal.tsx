@@ -331,7 +331,7 @@ export function ContextSettingsModal({
             >
               <FormField
                 label="AI Provider"
-                tooltip="Choose between Claude (via Agent SDK) or Gemini (via REST API)"
+                tooltip="Choose the AI provider used for observation extraction"
               >
                 <select
                   value={formState.CLAUDE_MEM_PROVIDER || 'claude'}
@@ -340,6 +340,8 @@ export function ContextSettingsModal({
                   <option value="claude">Claude (uses your Claude account)</option>
                   <option value="gemini">Gemini (uses API key)</option>
                   <option value="openrouter">OpenRouter (multi-model)</option>
+                  <option value="opencode-go">OpenCode Go</option>
+                  <option value="openai-compatible">OpenAI-compatible endpoint</option>
                 </select>
               </FormField>
 
@@ -441,6 +443,104 @@ export function ContextSettingsModal({
                       value={formState.CLAUDE_MEM_OPENROUTER_APP_NAME || 'claude-mem'}
                       onChange={(e) => updateSetting('CLAUDE_MEM_OPENROUTER_APP_NAME', e.target.value)}
                       placeholder="claude-mem"
+                    />
+                  </FormField>
+                </>
+              )}
+
+              {formState.CLAUDE_MEM_PROVIDER === 'opencode-go' && (
+                <>
+                  <FormField
+                    label="OpenCode Go API Key"
+                    tooltip="Your OpenCode Go API key (or set OPENCODE_GO_API_KEY env var)"
+                  >
+                    <input
+                      type="password"
+                      value={formState.CLAUDE_MEM_OPENCODE_GO_API_KEY || ''}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENCODE_GO_API_KEY', e.target.value)}
+                      placeholder="Enter OpenCode Go API key..."
+                    />
+                  </FormField>
+                  <FormField
+                    label="OpenCode Go Model"
+                    tooltip="OpenCode Go model ID for the raw OpenAI-compatible API"
+                  >
+                    <input
+                      type="text"
+                      value={formState.CLAUDE_MEM_OPENCODE_GO_MODEL || 'deepseek-v4-flash'}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENCODE_GO_MODEL', e.target.value)}
+                      placeholder="deepseek-v4-flash"
+                    />
+                  </FormField>
+                  <FormField
+                    label="OpenCode Go Base URL"
+                    tooltip="Advanced override for the OpenCode Go OpenAI-compatible base URL"
+                  >
+                    <input
+                      type="text"
+                      value={formState.CLAUDE_MEM_OPENCODE_GO_BASE_URL || 'https://opencode.ai/zen/go/v1'}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENCODE_GO_BASE_URL', e.target.value)}
+                      placeholder="https://opencode.ai/zen/go/v1"
+                    />
+                  </FormField>
+                </>
+              )}
+
+              {formState.CLAUDE_MEM_PROVIDER === 'openai-compatible' && (
+                <>
+                  <FormField
+                    label="API Key"
+                    tooltip="Bearer token for the OpenAI-compatible endpoint"
+                  >
+                    <input
+                      type="password"
+                      value={formState.CLAUDE_MEM_OPENAI_COMPAT_API_KEY || ''}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPAT_API_KEY', e.target.value)}
+                      placeholder="Enter API key..."
+                    />
+                  </FormField>
+                  <FormField
+                    label="Base URL"
+                    tooltip="Base URL ending at the v1 root; claude-mem appends /chat/completions"
+                  >
+                    <input
+                      type="text"
+                      value={formState.CLAUDE_MEM_OPENAI_COMPAT_BASE_URL || ''}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPAT_BASE_URL', e.target.value)}
+                      placeholder="https://example.com/v1"
+                    />
+                  </FormField>
+                  <FormField
+                    label="Model"
+                    tooltip="Model ID accepted by the endpoint"
+                  >
+                    <input
+                      type="text"
+                      value={formState.CLAUDE_MEM_OPENAI_COMPAT_MODEL || ''}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPAT_MODEL', e.target.value)}
+                      placeholder="model-id"
+                    />
+                  </FormField>
+                  <FormField
+                    label="Provider Name"
+                    tooltip="Display name used in worker logs and health status"
+                  >
+                    <input
+                      type="text"
+                      value={formState.CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME || 'OpenAI-compatible provider'}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME', e.target.value)}
+                      placeholder="OpenAI-compatible provider"
+                    />
+                  </FormField>
+                  <FormField
+                    label="Extra Headers JSON"
+                    tooltip="Optional JSON object of extra string headers"
+                  >
+                    <input
+                      type="text"
+                      value={formState.CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON || '{}'}
+                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON', e.target.value)}
+                      placeholder='{"X-Custom": "value"}'
                     />
                   </FormField>
                 </>

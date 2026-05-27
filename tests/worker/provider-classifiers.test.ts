@@ -5,7 +5,7 @@ import {
 } from '../../src/services/worker/provider-errors.js';
 import { classifyClaudeError } from '../../src/services/worker/ClaudeProvider.js';
 import { classifyGeminiError } from '../../src/services/worker/GeminiProvider.js';
-import { classifyOpenRouterError } from '../../src/services/worker/OpenRouterProvider.js';
+import { classifyOpenAICompatibleError, classifyOpenRouterError } from '../../src/services/worker/OpenRouterProvider.js';
 
 // Hard cases per F4 spec — provider-specific classifiers must map raw HTTP
 // shapes / SDK errors to ClassifiedProviderError with the right kind.
@@ -157,6 +157,19 @@ describe('classifyOpenRouterError', () => {
     const cause = new Error('ECONNRESET');
     const err = classifyOpenRouterError({ cause });
     expect(err.kind).toBe('transient');
+  });
+});
+
+describe('classifyOpenAICompatibleError', () => {
+  it('uses provider-specific labels while preserving the shared classification behavior', () => {
+    const err = classifyOpenAICompatibleError({
+      status: 403,
+      bodyText: 'forbidden',
+      cause: new Error('403'),
+      providerName: 'OpenCode Go',
+    });
+    expect(err.kind).toBe('auth_invalid');
+    expect(err.message).toContain('OpenCode Go');
   });
 });
 

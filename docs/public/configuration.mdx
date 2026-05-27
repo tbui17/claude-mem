@@ -14,7 +14,7 @@ Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created 
 | Setting                       | Default                         | Description                           |
 |-------------------------------|---------------------------------|---------------------------------------|
 | `CLAUDE_MEM_MODEL`            | `claude-haiku-4-5-20251001`     | Claude model used to compress observations (when using the Claude provider) |
-| `CLAUDE_MEM_PROVIDER`         | `claude`                        | AI provider: `claude`, `gemini`, or `openrouter` |
+| `CLAUDE_MEM_PROVIDER`         | `claude`                        | AI provider: `claude`, `gemini`, `openrouter`, `opencode-go`, or `openai-compatible` |
 | `CLAUDE_MEM_CLAUDE_AUTH_METHOD` | `subscription`                | Claude provider auth mode: `subscription`, `api-key`, or `gateway` |
 | `CLAUDE_MEM_MODE`             | `code`                          | Active mode profile (e.g., `code--es`, `email-investigation`) |
 | `CLAUDE_MEM_CONTEXT_OBSERVATIONS` | `50`                        | Number of observations to inject      |
@@ -44,6 +44,51 @@ See [Gemini Provider](usage/gemini-provider) for detailed configuration and free
 | `CLAUDE_MEM_OPENROUTER_APP_NAME`             | `claude-mem`                | Optional: App name for analytics      |
 
 See [OpenRouter Provider](usage/openrouter-provider) for detailed configuration, free model list, and usage guide.
+
+### OpenCode Go Provider Settings
+
+OpenCode Go uses an OpenAI-compatible Chat Completions endpoint with an OpenCode Go preset.
+
+| Setting                                | Default                         | Description                           |
+|----------------------------------------|---------------------------------|---------------------------------------|
+| `CLAUDE_MEM_OPENCODE_GO_API_KEY`       | —                               | OpenCode Go API key. You can also set `OPENCODE_GO_API_KEY` in `~/.claude-mem/.env` |
+| `CLAUDE_MEM_OPENCODE_GO_BASE_URL`      | `https://opencode.ai/zen/go/v1` | OpenCode Go OpenAI-compatible base URL |
+| `CLAUDE_MEM_OPENCODE_GO_MODEL`         | `deepseek-v4-flash`             | Model ID sent to OpenCode Go |
+
+Example:
+
+```json
+{
+  "CLAUDE_MEM_PROVIDER": "opencode-go",
+  "CLAUDE_MEM_OPENCODE_GO_API_KEY": "your-key",
+  "CLAUDE_MEM_OPENCODE_GO_MODEL": "deepseek-v4-flash"
+}
+```
+
+### Generic OpenAI-Compatible Provider Settings
+
+Use `CLAUDE_MEM_PROVIDER=openai-compatible` for providers that expose `/v1/chat/completions` with OpenAI-style `messages`.
+
+| Setting                                           | Default                      | Description                           |
+|---------------------------------------------------|------------------------------|---------------------------------------|
+| `CLAUDE_MEM_OPENAI_COMPAT_API_KEY`                | —                            | Bearer token for the provider |
+| `CLAUDE_MEM_OPENAI_COMPAT_BASE_URL`               | —                            | Base URL ending at the v1 root. Claude-mem appends `/chat/completions` unless the URL already ends there |
+| `CLAUDE_MEM_OPENAI_COMPAT_MODEL`                  | —                            | Model ID accepted by the provider |
+| `CLAUDE_MEM_OPENAI_COMPAT_PROVIDER_NAME`          | `OpenAI-compatible provider` | Display name used in logs and status |
+| `CLAUDE_MEM_OPENAI_COMPAT_HEADERS_JSON`           | `{}`                         | Optional JSON object of extra string headers |
+| `CLAUDE_MEM_OPENAI_COMPAT_MAX_CONTEXT_MESSAGES`   | `20`                         | Max messages in conversation history |
+| `CLAUDE_MEM_OPENAI_COMPAT_MAX_TOKENS`             | `100000`                     | Token budget safety limit |
+
+Example:
+
+```json
+{
+  "CLAUDE_MEM_PROVIDER": "openai-compatible",
+  "CLAUDE_MEM_OPENAI_COMPAT_API_KEY": "your-key",
+  "CLAUDE_MEM_OPENAI_COMPAT_BASE_URL": "https://example.com/v1",
+  "CLAUDE_MEM_OPENAI_COMPAT_MODEL": "model-id"
+}
+```
 
 ### Claude Gateway Settings
 

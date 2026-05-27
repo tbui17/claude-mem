@@ -33,6 +33,18 @@ Claude-mem is a Claude Code plugin providing persistent memory across sessions. 
 npm run build-and-sync        # Build, sync to marketplace, restart worker
 ```
 
+## Local Install Development
+
+On this Windows machine the active Claude and Codex installs are intentionally linked back to this checkout for fast local iteration:
+
+- Claude marketplace: `~/.claude/plugins/marketplaces/thedotmack/` -> `<project-root>/`
+- Claude plugin cache: `~/.claude/plugins/cache/thedotmack/claude-mem/13.3.0/` -> `<project-root>/plugin/`
+- Codex plugin cache: `~/.codex/plugins/cache/claude-mem-local/claude-mem/13.3.0/` -> `<project-root>/plugin/`
+
+Use Windows directory junctions for these links. Do not replace them with copied directories during local debugging unless you are deliberately testing the packaged install path.
+
+Manifest and static plugin edits under `plugin/` become visible from the linked install after restarting the relevant agent session. Runtime edits under `src/` still require `npm run build`, because hooks execute the generated files in `plugin/scripts/`.
+
 ## Configuration
 
 Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created with defaults on first run.

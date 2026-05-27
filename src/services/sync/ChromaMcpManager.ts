@@ -204,6 +204,11 @@ export class ChromaMcpManager {
 
     const depOverrideFlags = CHROMA_MCP_DEP_OVERRIDES.flatMap(spec => ['--with', spec]);
 
+    // uvx interprets positional arguments as the command name, not as a
+    // package+version specifier. Use --from to pin the exact version.
+    const pinnedPackage = `chroma-mcp==${CHROMA_MCP_PINNED_VERSION}`;
+    const commandName = 'chroma-mcp';
+
     if (chromaMode === 'remote') {
       const chromaHost = settings.CLAUDE_MEM_CHROMA_HOST || '127.0.0.1';
       const chromaPort = settings.CLAUDE_MEM_CHROMA_PORT || '8000';
@@ -215,7 +220,7 @@ export class ChromaMcpManager {
       const args = [
         '--python', pythonVersion,
         ...depOverrideFlags,
-        `chroma-mcp==${CHROMA_MCP_PINNED_VERSION}`,
+        '--from', pinnedPackage, commandName,
         '--client-type', 'http',
         '--host', chromaHost,
         '--port', chromaPort
@@ -241,7 +246,7 @@ export class ChromaMcpManager {
     return [
       '--python', pythonVersion,
       ...depOverrideFlags,
-      `chroma-mcp==${CHROMA_MCP_PINNED_VERSION}`,
+      '--from', pinnedPackage, commandName,
       '--client-type', 'persistent',
       '--data-dir', DEFAULT_CHROMA_DATA_DIR.replace(/\\/g, '/')
     ];

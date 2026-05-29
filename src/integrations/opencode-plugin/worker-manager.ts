@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { probePort } from '../../services/infrastructure/PortProbe.js';
+import { fallbackLogger, type PluginLogSink } from "./logger";
 
 const DEFAULT_WORKER_PORT = 37777;
 const KNOWN_WORKER_PORTS = [37780, 37779, 37777];
@@ -233,7 +233,10 @@ async function findFreePort(configuredPort: number): Promise<number | null> {
  * 3. If still not found, find a free port (skipping zombies), then spawn
  * 4. Return the first healthy worker, or null if all attempts fail
  */
-export async function ensureWorkerReady(configuredPort?: number): Promise<WorkerHealth | null> {
+export async function ensureWorkerReady(
+  configuredPort?: number,
+  logger: PluginLogSink = fallbackLogger,
+): Promise<WorkerHealth | null> {
   const port = configuredPort ?? resolveWorkerPort();
 
   // Step 1: Discover existing worker
@@ -241,7 +244,7 @@ export async function ensureWorkerReady(configuredPort?: number): Promise<Worker
   if (existing) return existing;
 
   // Step 2: Kill zombie processes and try again
-  console.log("[claude-mem] Worker not found, attempting to recover zombie processes...");
+  logger.info("Worker not found, attempting to recover zombie processes...");
   await recoverWorker();
   const afterRecover = await discoverWorker(port);
   if (afterRecover) return afterRecover;
@@ -249,24 +252,24 @@ export async function ensureWorkerReady(configuredPort?: number): Promise<Worker
   // Step 3: Find a free port (skipping zombies) then spawn
   const freePort = await findFreePort(port);
   if (freePort === null) {
-    console.warn("[claude-mem] No free port available — all candidates are occupied");
+    logger.warn("No free port available — all candidates are occupied");
     return null;
   }
 
-  console.log(`[claude-mem] Starting claude-mem worker on port ${freePort}...`);
+  logger.info(`Starting claude-mem worker on port ${freePort}...`);
   const started = startWorker(freePort);
   if (!started) {
-    console.warn("[claude-mem] Failed to start worker via npx");
+    logger.warn("Failed to start worker via npx");
     return null;
   }
 
   // Step 4: Wait for the worker to become healthy
   const spawned = await waitForWorker(freePort);
   if (spawned) {
-    console.log(`[claude-mem] Worker started on port ${spawned.port}`);
+    logger.info(`Worker started on port ${spawned.port}`);
     return spawned;
   }
 
-  console.warn("[claude-mem] Worker failed to become healthy within timeout");
+  logger.warn("Worker failed to become healthy within timeout");
   return null;
 }

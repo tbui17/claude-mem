@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PluginNotifier, type PluginLogSink } from "./logger";
 import { ensureWorkerReady, resolveWorkerPort, type WorkerHealth } from "./worker-manager";
 interface OpenCodeProject {
   name?: string;
@@ -64,9 +65,9 @@ let _workerInitPromise: Promise<WorkerHealth | null> | null = null;
  * Lazy worker init — discovers or starts the worker, caches the result.
  * First call may spawn a new worker process or kill zombie sockets.
  */
-function ensureWorkerInitialized(): Promise<WorkerHealth | null> {
+function ensureWorkerInitialized(logger: PluginLogSink): Promise<WorkerHealth | null> {
   if (_workerInitPromise === null) {
-    _workerInitPromise = ensureWorkerReady().then((w) => {
+    _workerInitPromise = ensureWorkerReady(undefined, logger).then((w) => {
       _worker = w;
       return w;
     });
@@ -87,35 +88,37 @@ const JSON_HEADERS: Record<string, string> = { "Content-Type": "application/json
 function workerPostFireAndForget(
   path: string,
   body: Record<string, unknown>,
+  logger: PluginLogSink,
 ): void {
-  console.log(`[claude-mem] POST ${path} → ${workerBaseUrl()}${path}`);
+  logger.debug(`POST ${path} → ${workerBaseUrl()}${path}`);
   fetch(`${workerBaseUrl()}${path}`, {
     method: "POST",
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
   })
     .then((response) => {
-      console.log(`[claude-mem] POST ${path} → ${response.status} ${response.statusText}`);
-  }).catch((error: unknown) => {
+      logger.debug(`POST ${path} → ${response.status} ${response.statusText}`);
+    })
+    .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.includes("ECONNREFUSED")) {
-        console.warn(`[claude-mem] Worker POST ${path} failed: ${message}`);
+        logger.warn(`Worker POST ${path} failed: ${message}`);
       }
     });
 }
 
-async function workerGetText(path: string): Promise<string | null> {
+async function workerGetText(path: string, logger: PluginLogSink): Promise<string | null> {
   try {
     const response = await fetch(`${workerBaseUrl()}${path}`, { headers: JSON_HEADERS });
     if (!response.ok) {
-      console.warn(`[claude-mem] Worker GET ${path} returned ${response.status}`);
+      logger.warn(`Worker GET ${path} returned ${response.status}`);
       return null;
     }
     return await response.text();
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("ECONNREFUSED")) {
-      console.warn(`[claude-mem] Worker GET ${path} failed: ${message}`);
+      logger.warn(`Worker GET ${path} failed: ${message}`);
     }
     return null;
   }
@@ -129,8 +132,12 @@ function truncate(text: string): string {
 
 export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
   const projectName = ctx.project?.name || "opencode";
+  const notifier = new PluginNotifier({
+    client: ctx.client,
+    directory: ctx.directory,
+  });
 
-  console.log(`[claude-mem] OpenCode plugin loading (project: ${projectName})`);
+  notifier.info(`OpenCode plugin loading (project: ${projectName})`);
 
   // Per-plugin-instance state. Keeping these inside the factory closure (rather
   // than at module scope) gives each `ClaudeMemPlugin(ctx)` call a fresh map/set,
@@ -167,7 +174,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
         contentSessionId,
         project: projectName,
         prompt: "",
-      });
+      }, notifier);
     }
     return contentSessionId;
   }
@@ -177,7 +184,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
       input: ToolExecuteAfterInput,
       output: ToolExecuteAfterOutput,
     ): Promise<void> => {
-      console.log(`[claude-mem] tool.execute.after called: tool=${input?.tool}, sessionID=${input?.sessionID}`);
+      notifier.debug(`tool.execute.after called: tool=${input?.tool}, sessionID=${input?.sessionID}`);
       // Without this guard a sessionless tool call would key the session map
       // on the literal string "undefined" and collapse every sessionless
       // observation into one phantom `opencode-undefined-<ts>` session
@@ -190,7 +197,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
         tool_input: input.args || {},
         tool_response: truncate(output.output || ""),
         cwd: ctx.directory,
-      });
+      }, notifier);
     },
 
     "chat.message": async (input: ChatMessageInput): Promise<void> => {
@@ -222,7 +229,27 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
           if (sid) ensureSessionInitialized(sid);
           // Proactive worker init — triggers recovery/startup in background
           // so it's ready before the first search or observation
-          ensureWorkerInitialized();
+          ensureWorkerInitialized(notifier)
+            .then((worker) => {
+              if (!worker) return;
+              notifier.toast({
+                title: "claude-mem worker ready",
+                message: `Memory capture is available on port ${worker.port}.`,
+                variant: "success",
+                cooldownKey: "worker-ready",
+                cooldownMs: 10_000,
+              });
+            })
+            .catch((error: unknown) => {
+              notifier.warn("Worker initialization failed", error instanceof Error ? error.message : String(error));
+              notifier.toast({
+                title: "claude-mem worker unavailable",
+                message: "Memory capture is disabled until the worker responds.",
+                variant: "warning",
+                cooldownKey: "worker-init-failed",
+                cooldownMs: 10_000,
+              });
+            });
           break;
         }
 
@@ -239,7 +266,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
             tool_input: {},
             tool_response: truncate(text),
             cwd: ctx.directory,
-          });
+          }, notifier);
           break;
         }
 
@@ -250,7 +277,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
           workerPostFireAndForget("/api/sessions/summarize", {
             contentSessionId,
             last_assistant_message: "",
-          });
+          }, notifier);
           break;
         }
 
@@ -282,9 +309,17 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
 
           const text = await workerGetText(
             `/api/search/observations?query=${encodeURIComponent(query)}&limit=10`,
+            notifier,
           );
 
           if (!text) {
+            notifier.toast({
+              title: "claude-mem worker unavailable",
+              message: "Start it with: npx claude-mem start",
+              variant: "warning",
+              cooldownKey: "worker-unavailable",
+              cooldownMs: 10_000,
+            });
             return "claude-mem worker is not running. Start it with: npx claude-mem start";
           }
 
@@ -294,7 +329,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
           try {
             data = JSON.parse(text);
           } catch (error: unknown) {
-            console.warn('[claude-mem] Failed to parse search results:', error instanceof Error ? error.message : String(error));
+            notifier.warn("Failed to parse search results", error instanceof Error ? error.message : String(error));
             return "Failed to parse search results.";
           }
           let responseText: string;

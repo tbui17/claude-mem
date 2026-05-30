@@ -5,6 +5,7 @@ import {
   REGISTERED_OPENCODE_HOOKS,
   REAL_OPENCODE_EVENT_TYPES,
 } from "../../src/integrations/opencode-plugin/index";
+import { PluginNotifier } from "../../src/integrations/opencode-plugin/logger";
 
 /**
  * Regression guard for plan-08 (OpenCode event-contract correctness).
@@ -49,6 +50,78 @@ const pluginCtx = {
   $: {},
 };
 
+function createFetchRecorder(responseFactory?: (url: string, init?: RequestInit) => Response | Promise<Response>) {
+  const posts: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const stringUrl = String(url);
+    posts.push({
+      url: stringUrl,
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+    });
+    return responseFactory?.(stringUrl, init) ?? new Response(JSON.stringify({ status: "queued" }), { status: 200 });
+  }) as typeof fetch;
+
+  return {
+    posts,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+function createOpenCodeClientRecorder() {
+  const logs: Array<{
+    body: {
+      service: "claude-mem";
+      level: string;
+      message: string;
+      extra?: Record<string, unknown>;
+    };
+  }> = [];
+  const toasts: Array<{
+    body: {
+      title: string;
+      message: string;
+      variant: string;
+      duration?: number;
+      directory?: string;
+    };
+  }> = [];
+
+  return {
+    logs,
+    toasts,
+    client: {
+      app: {
+        log: (input: (typeof logs)[number]) => {
+          logs.push(input);
+        },
+      },
+      tui: {
+        showToast: (input: (typeof toasts)[number]) => {
+          toasts.push(input);
+        },
+      },
+    },
+  };
+}
+
+function withConsoleErrorRecorder() {
+  const calls: unknown[][] = [];
+  const originalError = globalThis.console.error;
+  globalThis.console.error = (...args: unknown[]) => {
+    calls.push(args);
+  };
+
+  return {
+    calls,
+    restore: () => {
+      globalThis.console.error = originalError;
+    },
+  };
+}
+
 describe("OpenCode plugin event contract", () => {
   it("only registers hooks that are part of OpenCode's real contract", async () => {
     const plugin = await ClaudeMemPlugin(pluginCtx);
@@ -91,23 +164,17 @@ describe("OpenCode plugin event contract", () => {
     }
   });
 
-  it("posts observations to the worker via tool.execute.after", async () => {
-    const posts: Array<{ url: string; body: unknown }> = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      posts.push({
-        url: String(url),
-        body: init?.body ? JSON.parse(String(init.body)) : null,
-      });
-      return new Response(JSON.stringify({ status: "queued" }), { status: 200 });
-    }) as typeof fetch;
+  it("posts observations to the worker via tool.execute.after and toasts the full output.args input", async () => {
+    const { posts, restore } = createFetchRecorder();
+    const { client, toasts } = createOpenCodeClientRecorder();
 
     try {
-      const plugin = await ClaudeMemPlugin(pluginCtx);
+      const plugin = await ClaudeMemPlugin({ ...pluginCtx, client });
       const toolAfter = plugin["tool.execute.after"];
+      const toolArgs = { path: "/a", nested: { keep: true }, count: 3 };
       await toolAfter(
-        { tool: "read", sessionID: "ses_1", callID: "c1" },
-        { title: "Read", output: "file contents", metadata: {}, args: { path: "/a" } },
+        { tool: "read", sessionID: "ses_tool_toast", callID: "c1" },
+        { title: "Read", output: "file contents", metadata: {}, args: toolArgs },
       );
 
       const initPost = posts.find((p) => p.url.includes("/api/sessions/init"));
@@ -116,9 +183,179 @@ describe("OpenCode plugin event contract", () => {
       expect(obsPost, "tool.execute.after should POST an observation").toBeTruthy();
       const obsBody = obsPost!.body as Record<string, unknown>;
       expect(obsBody.tool_name).toBe("read");
+      expect(obsBody.tool_input).toEqual(toolArgs);
       expect(obsBody.tool_response).toBe("file contents");
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0].body.message).toBe(JSON.stringify(toolArgs, null, 2));
+      expect(toasts[0].body.variant).toBe("success");
+      expect(toasts[0].body.duration).toBe(2500);
+      expect(toasts[0].body.directory).toBe("/tmp/x");
+    } finally {
+      restore();
+    }
+  });
+
+  it("posts assistant chat observations and success toasts from output.parts text", async () => {
+    const { posts, restore } = createFetchRecorder();
+    const { client, toasts } = createOpenCodeClientRecorder();
+    const capturedMessage = "First assistant paragraph.\nSecond assistant paragraph.";
+
+    try {
+      const plugin = await ClaudeMemPlugin({ ...pluginCtx, client });
+      const chatMessage = plugin["chat.message"];
+      await chatMessage(
+        {},
+        {
+          message: { id: "msg_1", role: "assistant", sessionID: "ses_chat_toast" },
+          parts: [
+            { type: "text", text: "First assistant paragraph." },
+            { type: "tool", text: "ignored" },
+            { type: "text", text: "Second assistant paragraph." },
+          ],
+        },
+      );
+
+      const obsPost = posts.find((p) => p.url.includes("/api/sessions/observations"));
+      expect(obsPost, "chat.message should POST an assistant observation").toBeTruthy();
+      const obsBody = obsPost!.body as Record<string, unknown>;
+      expect(obsBody.tool_name).toBe("assistant_message");
+      expect(obsBody.tool_response).toBe(capturedMessage);
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0].body.message).toBe(capturedMessage);
+      expect(toasts[0].body.variant).toBe("success");
+      expect(toasts[0].body.duration).toBe(2500);
+      expect(toasts[0].body.directory).toBe("/tmp/x");
+    } finally {
+      restore();
+    }
+  });
+
+  it("shows a warning toast when claude_mem_search cannot reach the worker", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as typeof fetch;
+    const { client, toasts } = createOpenCodeClientRecorder();
+
+    try {
+      const plugin = await ClaudeMemPlugin({ ...pluginCtx, client });
+      const result = await plugin.tool.claude_mem_search.execute({ query: "auth" });
+
+      expect(result).toContain("claude-mem worker is not running");
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0].body.message).toContain("npx claude-mem start");
+      expect(toasts[0].body.variant).toBe("warning");
+      expect(toasts[0].body.directory).toBe("/tmp/x");
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("PluginNotifier OpenCode logging and toast contract", () => {
+  it("logs through client.app.log and sends toasts directly through client.tui.showToast", () => {
+    const { client, logs, toasts } = createOpenCodeClientRecorder();
+    const notifier = new PluginNotifier(client, "/workspace/project");
+
+    notifier.warn("worker slow", { retry: true });
+    notifier.toast({
+      title: "Memory saved",
+      message: "Captured read output",
+      variant: "success",
+      duration: 2500,
+      extra: { tool: "read" },
+    });
+
+    expect(logs[0]).toEqual({
+      body: {
+        service: "claude-mem",
+        level: "warn",
+        message: "worker slow",
+        extra: { retry: true },
+      },
+    });
+    expect(logs[1].body).toMatchObject({
+      service: "claude-mem",
+      level: "info",
+      message: "OpenCode toast attempted",
+      extra: {
+        title: "Memory saved",
+        message: "Captured read output",
+        variant: "success",
+        duration: 2500,
+        directory: "/workspace/project",
+        tool: "read",
+      },
+    });
+    expect(toasts).toEqual([
+      {
+        body: {
+          title: "Memory saved",
+          message: "Captured read output",
+          variant: "success",
+          duration: 2500,
+          directory: "/workspace/project",
+        },
+      },
+    ]);
+  });
+
+  it("logs every toast attempt and reports a clear unavailable-toast message", () => {
+    const logs: unknown[] = [];
+    const consoleError = withConsoleErrorRecorder();
+    const notifier = new PluginNotifier(
+      {
+        app: {
+          log: (input: unknown) => logs.push(input),
+        },
+      },
+      "/workspace/project",
+    );
+
+    try {
+      expect(() =>
+        notifier.toast({
+          title: "Memory saved",
+          message: "Captured read output",
+          variant: "success",
+        }),
+      ).not.toThrow();
+
+      expect(logs).toHaveLength(1);
+      expect(consoleError.calls).toHaveLength(1);
+      expect(String(consoleError.calls[0][0])).toContain("OpenCode TUI toast API is unavailable");
+      expect(String(consoleError.calls[0][0])).toContain("toast was not shown");
+    } finally {
+      consoleError.restore();
+    }
+  });
+
+  it("treats toast failures as best-effort and does not throw", async () => {
+    const consoleError = withConsoleErrorRecorder();
+    const app = { log: () => undefined };
+    const throwingNotifier = new PluginNotifier({ app, tui: { showToast: () => { throw new Error("boom"); } } });
+    const rejectingNotifier = new PluginNotifier({ app, tui: { showToast: () => Promise.reject(new Error("async boom")) } });
+
+    try {
+      expect(() =>
+        throwingNotifier.toast({
+          title: "Memory saved",
+          message: "Captured read output",
+          variant: "success",
+        }),
+      ).not.toThrow();
+      expect(() =>
+        rejectingNotifier.toast({
+          title: "Memory saved",
+          message: "Captured read output",
+          variant: "success",
+        }),
+      ).not.toThrow();
+      await Promise.resolve();
+
+      expect(consoleError.calls.some((call) => String(call[0]).includes("OpenCode TUI toast failed"))).toBe(true);
+    } finally {
+      consoleError.restore();
     }
   });
 });

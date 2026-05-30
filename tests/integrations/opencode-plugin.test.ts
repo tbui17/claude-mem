@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 
 import { ClaudeMemPlugin } from "../../src/integrations/opencode-plugin/index.ts";
+import { PluginNotifier } from "../../src/integrations/opencode-plugin/logger.ts";
 
 interface CapturedPost {
   path: string;
@@ -18,6 +19,7 @@ const FAKE_CTX = {
 
 const realFetch = globalThis.fetch;
 let captured: CapturedPost[] = [];
+let consoleErrorSpy: ReturnType<typeof spyOn>;
 
 function installFetchSpy(): void {
   captured = [];
@@ -40,8 +42,10 @@ function installFetchSpy(): void {
   }) as typeof fetch;
 }
 
-async function loadHooks(): Promise<Record<string, unknown>> {
-  const hooks = await ClaudeMemPlugin(FAKE_CTX as Parameters<typeof ClaudeMemPlugin>[0]);
+async function loadHooks(
+  ctx: Parameters<typeof ClaudeMemPlugin>[0] = FAKE_CTX as Parameters<typeof ClaudeMemPlugin>[0],
+): Promise<Record<string, unknown>> {
+  const hooks = await ClaudeMemPlugin(ctx);
   return hooks as Record<string, unknown>;
 }
 
@@ -52,10 +56,12 @@ async function flushFireAndForget(): Promise<void> {
 describe("opencode-plugin — OpenCode Hooks contract", () => {
   beforeEach(() => {
     installFetchSpy();
+    consoleErrorSpy = spyOn(console, "error").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     (globalThis as unknown as { fetch: typeof fetch }).fetch = realFetch;
+    consoleErrorSpy.mockRestore();
   });
 
   it("exposes hooks as FLAT top-level keys (not nested under a 'hooks' wrapper)", async () => {
@@ -95,6 +101,33 @@ describe("opencode-plugin — OpenCode Hooks contract", () => {
     const obs = captured.find((c) => c.path === "/api/sessions/observations");
     expect(obs?.body.tool_name).toBe("read");
     expect(obs?.body.cwd).toBe("/tmp/demo");
+  });
+
+  it("'tool.execute.after' shows a toast when an observation is captured", async () => {
+    const showToast = mock(() => undefined);
+    const hooks = await loadHooks({
+      ...FAKE_CTX,
+      client: { tui: { showToast } },
+    } as Parameters<typeof ClaudeMemPlugin>[0]);
+    const toolAfter = hooks["tool.execute.after"] as (
+      input: unknown,
+      output: unknown,
+    ) => Promise<void>;
+
+    await toolAfter(
+      { tool: "read", sessionID: "s-toast", callID: "c1", args: { path: "/a" } },
+      { title: "t", output: "OK", metadata: {} },
+    );
+
+    expect(showToast).toHaveBeenCalledWith({
+      body: {
+        title: "claude-mem observation captured",
+        message: 'read input: {"path":"/a"}',
+        variant: "success",
+        duration: 2500,
+        directory: "/tmp/demo",
+      },
+    });
   });
 
   it("'tool.execute.after' skips POSTs when sessionID is missing (no phantom 'opencode-undefined-*' session, claude-mem#2503 follow-up)", async () => {
@@ -208,6 +241,95 @@ describe("opencode-plugin — OpenCode Hooks contract", () => {
     const obs = captured.find((c) => c.path === "/api/sessions/observations");
     expect(obs?.body.tool_name).toBe("assistant_message");
     expect(obs?.body.tool_response).toBe("hi back");
+  });
+
+  it("event(message.updated) shows a toast when an assistant observation is captured", async () => {
+    const showToast = mock(() => undefined);
+    const hooks = await loadHooks({
+      ...FAKE_CTX,
+      client: { tui: { showToast } },
+    } as Parameters<typeof ClaudeMemPlugin>[0]);
+    const eventFn = hooks.event as (input: unknown) => Promise<void>;
+
+    await eventFn({
+      event: {
+        type: "message.updated",
+        properties: {
+          info: { role: "assistant", sessionID: "s-msg-toast", content: "hi back" },
+        },
+      },
+    });
+
+    expect(showToast).toHaveBeenCalledWith({
+      body: {
+        title: "claude-mem observation captured",
+        message: "assistant_message input: hi back",
+        variant: "success",
+        duration: 2500,
+        directory: "/tmp/demo",
+      },
+    });
+  });
+
+  it("observation toast message includes the full tool input", async () => {
+    const showToast = mock(() => undefined);
+    const hooks = await loadHooks({
+      ...FAKE_CTX,
+      client: { tui: { showToast } },
+    } as Parameters<typeof ClaudeMemPlugin>[0]);
+    const toolAfter = hooks["tool.execute.after"] as (
+      input: unknown,
+      output: unknown,
+    ) => Promise<void>;
+    const longValue = "x".repeat(220);
+
+    await toolAfter(
+      { tool: "read", sessionID: "s-toast-long", callID: "c1", args: { path: "/a", value: longValue } },
+      { title: "t", output: "OK", metadata: {} },
+    );
+
+    const toastArg = showToast.mock.calls[0]?.[0] as { body?: { message?: string } };
+    expect(toastArg.body?.message).toBe(`read input: {"path":"/a","value":"${longValue}"}`);
+  });
+
+  it("PluginNotifier logs a console error when OpenCode tui.showToast is unavailable", () => {
+    const notifier = new PluginNotifier({ client: {}, context: "TEST" });
+
+    notifier.toast({
+      title: "missing toast",
+      message: "will not display",
+      variant: "warning",
+    });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[TEST] OpenCode tui.showToast unavailable; unable to show toast: missing toast",
+    );
+  });
+
+  it("PluginNotifier logs toast attempts through OpenCode app.log", () => {
+    const appLog = mock(() => undefined);
+    const showToast = mock(() => undefined);
+    const notifier = new PluginNotifier({
+      client: { app: { log: appLog }, tui: { showToast } },
+      context: "TEST",
+      directory: "/tmp/demo",
+    });
+
+    notifier.toast({
+      title: "traceable toast",
+      message: "visible message",
+      variant: "info",
+    });
+
+    expect(appLog).toHaveBeenCalledWith({
+      body: {
+        service: "claude-mem",
+        level: "info",
+        message: "[TEST] Toast requested (info): traceable toast",
+        extra: undefined,
+      },
+    });
+    expect(showToast).toHaveBeenCalled();
   });
 
   it("event(session.compacted) reads properties.sessionID and POSTs summarize", async () => {

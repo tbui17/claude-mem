@@ -130,6 +130,15 @@ function truncate(text: string): string {
     : text;
 }
 
+function formatToastInput(input: unknown): string {
+  try {
+    if (typeof input === "string") return input;
+    return JSON.stringify(input);
+  } catch {
+    return String(input);
+  }
+}
+
 export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
   const projectName = ctx.project?.name || "opencode";
   const notifier = new PluginNotifier({
@@ -179,6 +188,15 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
     return contentSessionId;
   }
 
+  function toastObservationCaptured(toolName: string, toolInput: unknown): void {
+    notifier.toast({
+      title: "claude-mem observation captured",
+      message: `${toolName} input: ${formatToastInput(toolInput)}`,
+      variant: "success",
+      duration: 2500,
+    });
+  }
+
   return {
     "tool.execute.after": async (
       input: ToolExecuteAfterInput,
@@ -198,6 +216,7 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
         tool_response: truncate(output.output || ""),
         cwd: ctx.directory,
       }, notifier);
+      toastObservationCaptured(input.tool, input.args || {});
     },
 
     "chat.message": async (input: ChatMessageInput): Promise<void> => {
@@ -263,10 +282,11 @@ export const ClaudeMemPlugin = async (ctx: OpenCodePluginContext) => {
           workerPostFireAndForget("/api/sessions/observations", {
             contentSessionId,
             tool_name: "assistant_message",
-            tool_input: {},
+            tool_input: info.content ?? {},
             tool_response: truncate(text),
             cwd: ctx.directory,
           }, notifier);
+          toastObservationCaptured("assistant_message", info.content);
           break;
         }
 

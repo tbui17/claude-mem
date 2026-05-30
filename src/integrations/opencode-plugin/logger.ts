@@ -23,7 +23,7 @@ interface OpenCodeClientLike {
     log?: (entry: AppLogEntry) => Promise<unknown> | unknown;
   };
   tui?: {
-    showToast?: (parameters: ToastParameters) => Promise<void> | void;
+    showToast?: (parameters: { body: ToastParameters }) => Promise<void> | void;
   };
 }
 
@@ -95,6 +95,8 @@ export class PluginNotifier implements PluginLogSink {
     cooldownKey?: string;
     cooldownMs?: number;
   }): void {
+    this.appLog("info", `Toast requested (${input.variant}): ${input.title ?? input.message}`);
+
     const cooldownKey = input.cooldownKey;
     if (cooldownKey) {
       const existing = this.cooldowns.get(cooldownKey);
@@ -105,15 +107,21 @@ export class PluginNotifier implements PluginLogSink {
       }
     }
 
-    const showToast = this.client?.tui?.showToast;
-    if (!showToast) return;
+    if (!this.client?.tui?.showToast) {
+      globalThis.console.error(
+        `[${this.context}] OpenCode tui.showToast unavailable; unable to show toast: ${input.title ?? input.message}`,
+      );
+      return;
+    }
     try {
-      const result = showToast({
-        title: input.title,
-        message: input.message,
-        variant: input.variant,
-        duration: input.duration,
-        directory: this.directory,
+      const result = this.client.tui.showToast({
+        body: {
+          title: input.title,
+          message: input.message,
+          variant: input.variant,
+          duration: input.duration,
+          directory: this.directory,
+        },
       });
       if (result && typeof (result as Promise<void>).then === "function") {
         (result as Promise<void>).catch(() => undefined);

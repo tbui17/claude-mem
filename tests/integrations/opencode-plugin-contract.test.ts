@@ -122,6 +122,10 @@ function withConsoleErrorRecorder() {
   };
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 describe("OpenCode plugin event contract", () => {
   it("only registers hooks that are part of OpenCode's real contract", async () => {
     const plugin = await ClaudeMemPlugin(pluginCtx);
@@ -298,6 +302,133 @@ describe("PluginNotifier OpenCode logging and toast contract", () => {
         },
       },
     ]);
+  });
+
+  it("queues rapid consecutive toasts and displays them one at a time", async () => {
+    const { client, toasts } = createOpenCodeClientRecorder();
+    const notifier = new PluginNotifier(client, "/workspace/project");
+
+    notifier.toast({
+      title: "First",
+      message: "Captured first output",
+      variant: "success",
+      duration: 1,
+    });
+    notifier.toast({
+      title: "Second",
+      message: "Captured second output",
+      variant: "success",
+      duration: 1,
+    });
+
+    expect(toasts.map((toast) => toast.body.title)).toEqual(["First"]);
+    await delay(175);
+    expect(toasts.map((toast) => toast.body.title)).toEqual(["First", "Second"]);
+  });
+
+  it("waits the toast duration plus buffer before displaying the next toast", async () => {
+    const { client, toasts } = createOpenCodeClientRecorder();
+    const notifier = new PluginNotifier(client, "/workspace/project");
+
+    notifier.toast({
+      title: "Longer",
+      message: "Visible longer",
+      variant: "info",
+      duration: 50,
+    });
+    notifier.toast({
+      title: "After buffer",
+      message: "Shown after the buffer",
+      variant: "success",
+      duration: 1,
+    });
+
+    await delay(120);
+    expect(toasts.map((toast) => toast.body.title)).toEqual(["Longer"]);
+    await delay(100);
+    expect(toasts.map((toast) => toast.body.title)).toEqual(["Longer", "After buffer"]);
+  });
+
+  it("continues draining the queue after showToast rejects", async () => {
+    const consoleError = withConsoleErrorRecorder();
+    const logs: unknown[] = [];
+    const toasts: Array<{ body: { title: string; message: string; variant: string; duration?: number; directory?: string } }> = [];
+    let calls = 0;
+    const notifier = new PluginNotifier(
+      {
+        app: { log: (input: unknown) => logs.push(input) },
+        tui: {
+          showToast: (input: (typeof toasts)[number]) => {
+            calls += 1;
+            if (calls === 1) {
+              return Promise.reject(new Error("async boom"));
+            }
+            toasts.push(input);
+          },
+        },
+      },
+      "/workspace/project",
+    );
+
+    try {
+      notifier.toast({ title: "Rejects", message: "First", variant: "error", duration: 1 });
+      notifier.toast({ title: "Continues", message: "Second", variant: "success", duration: 1 });
+
+      await delay(175);
+
+      expect(calls).toBe(2);
+      expect(toasts.map((toast) => toast.body.title)).toEqual(["Continues"]);
+      expect(logs).toHaveLength(2);
+      expect(consoleError.calls.some((call) => String(call[0]).includes("OpenCode TUI toast failed"))).toBe(true);
+    } finally {
+      consoleError.restore();
+    }
+  });
+
+  it("logs unavailable showToast fallback errors and keeps draining the queue", async () => {
+    const consoleError = withConsoleErrorRecorder();
+    const logs: unknown[] = [];
+    const notifier = new PluginNotifier(
+      {
+        app: {
+          log: (input: unknown) => logs.push(input),
+        },
+        tui: {},
+      },
+      "/workspace/project",
+    );
+
+    try {
+      expect(() => {
+        notifier.toast({ title: "One", message: "First", variant: "info", duration: 1 });
+        notifier.toast({ title: "Two", message: "Second", variant: "success", duration: 1 });
+      }).not.toThrow();
+
+      expect(logs).toHaveLength(1);
+      expect(consoleError.calls).toHaveLength(1);
+      await delay(175);
+      expect(logs).toHaveLength(2);
+      expect(consoleError.calls).toHaveLength(2);
+      expect(String(consoleError.calls[0][0])).toContain("OpenCode TUI toast API is unavailable");
+    } finally {
+      consoleError.restore();
+    }
+  });
+
+  it("drops the oldest info toast first when the pending queue is full", () => {
+    const { client, logs, toasts } = createOpenCodeClientRecorder();
+    const notifier = new PluginNotifier(client, "/workspace/project");
+
+    notifier.toast({ title: "Active", message: "First", variant: "success", duration: 1000 });
+    notifier.toast({ title: "Queued success", message: "Second", variant: "success", duration: 1 });
+    for (let index = 0; index < 10; index += 1) {
+      notifier.toast({ title: `Queued info ${index}`, message: "Info", variant: "info", duration: 1 });
+    }
+
+    expect(toasts.map((toast) => toast.body.title)).toEqual(["Active"]);
+    expect(logs.some((log) => log.body.message === "OpenCode toast dropped from full queue")).toBe(true);
+    const dropLog = logs.find((log) => log.body.message === "OpenCode toast dropped from full queue");
+    expect(dropLog?.body.extra).toMatchObject({ title: "Queued info 0", variant: "info" });
   });
 
   it("logs every toast attempt and reports a clear unavailable-toast message", () => {

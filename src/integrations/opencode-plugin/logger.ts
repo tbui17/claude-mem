@@ -34,6 +34,8 @@ interface OpenCodeLogClient {
         message: string;
         variant: ToastVariant;
         duration?: number;
+      };
+      query?: {
         directory?: string;
       };
     }) => unknown;
@@ -171,8 +173,8 @@ export class PluginNotifier extends PluginLogSink {
           message,
           variant,
           duration,
-          directory,
         },
+        ...(directory ? { query: { directory } } : {}),
       });
       if (isPromiseLike(result)) {
         await result.catch((error: unknown) => {

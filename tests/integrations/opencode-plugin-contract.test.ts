@@ -85,8 +85,8 @@ function createOpenCodeClientRecorder() {
       message: string;
       variant: string;
       duration?: number;
-      directory?: string;
     };
+    query?: { directory?: string };
   }> = [];
 
   return {
@@ -193,7 +193,7 @@ describe("OpenCode plugin event contract", () => {
       expect(toasts[0].body.message).toBe(JSON.stringify(toolArgs, null, 2));
       expect(toasts[0].body.variant).toBe("success");
       expect(toasts[0].body.duration).toBe(2500);
-      expect(toasts[0].body.directory).toBe("/tmp/x");
+      expect(toasts[0].query?.directory).toBe("/tmp/x");
     } finally {
       restore();
     }
@@ -228,7 +228,7 @@ describe("OpenCode plugin event contract", () => {
       expect(toasts[0].body.message).toBe(capturedMessage);
       expect(toasts[0].body.variant).toBe("success");
       expect(toasts[0].body.duration).toBe(2500);
-      expect(toasts[0].body.directory).toBe("/tmp/x");
+      expect(toasts[0].query?.directory).toBe("/tmp/x");
     } finally {
       restore();
     }
@@ -249,7 +249,7 @@ describe("OpenCode plugin event contract", () => {
       expect(toasts).toHaveLength(1);
       expect(toasts[0].body.message).toContain("npx claude-mem start");
       expect(toasts[0].body.variant).toBe("warning");
-      expect(toasts[0].body.directory).toBe("/tmp/x");
+      expect(toasts[0].query?.directory).toBe("/tmp/x");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -298,8 +298,8 @@ describe("PluginNotifier OpenCode logging and toast contract", () => {
           message: "Captured read output",
           variant: "success",
           duration: 2500,
-          directory: "/workspace/project",
         },
+        query: { directory: "/workspace/project" },
       },
     ]);
   });
@@ -352,7 +352,10 @@ describe("PluginNotifier OpenCode logging and toast contract", () => {
   it("continues draining the queue after showToast rejects", async () => {
     const consoleError = withConsoleErrorRecorder();
     const logs: unknown[] = [];
-    const toasts: Array<{ body: { title: string; message: string; variant: string; duration?: number; directory?: string } }> = [];
+    const toasts: Array<{
+      body: { title: string; message: string; variant: string; duration?: number };
+      query?: { directory?: string };
+    }> = [];
     let calls = 0;
     const notifier = new PluginNotifier(
       {

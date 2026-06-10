@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { quoteForCmdExe } from '../../../src/services/sync/ChromaMcpManager.js';
+import { ChromaMcpManager, quoteForCmdExe } from '../../../src/services/sync/ChromaMcpManager.js';
 import { codexSpawn } from '../../../src/services/integrations/CodexCliInstaller.js';
 
 // Windows spawn-contract fixes folded into plans/02-spawn-contract-templating.md:
@@ -7,9 +7,9 @@ import { codexSpawn } from '../../../src/services/integrations/CodexCliInstaller
 //   #2695 — Codex CLI: spawnSync ENOENT for codex.cmd
 
 describe('Windows #2696 - cmd.exe metacharacter quoting for chroma-mcp deps', () => {
-  it('quotes dep specs containing cmd.exe redirection operators', () => {
-    expect(quoteForCmdExe('protobuf<7')).toBe('"protobuf<7"');
-    expect(quoteForCmdExe('onnxruntime>=1.20')).toBe('"onnxruntime>=1.20"');
+  it('caret-escapes dep specs containing cmd.exe redirection operators', () => {
+    expect(quoteForCmdExe('protobuf<7')).toBe('protobuf^<7');
+    expect(quoteForCmdExe('onnxruntime>=1.20')).toBe('onnxruntime^>=1.20');
   });
 
   it('leaves ordinary args (no metacharacters) byte-identical', () => {
@@ -21,15 +21,15 @@ describe('Windows #2696 - cmd.exe metacharacter quoting for chroma-mcp deps', ()
     expect(quoteForCmdExe('persistent')).toBe('persistent');
   });
 
-  it('quotes pipe/ampersand/caret/paren metacharacters too', () => {
-    expect(quoteForCmdExe('a|b')).toBe('"a|b"');
-    expect(quoteForCmdExe('a&b')).toBe('"a&b"');
-    expect(quoteForCmdExe('a^b')).toBe('"a^b"');
-    expect(quoteForCmdExe('a(b)')).toBe('"a(b)"');
+  it('escapes pipe/ampersand/caret/paren metacharacters too', () => {
+    expect(quoteForCmdExe('a|b')).toBe('a^|b');
+    expect(quoteForCmdExe('a&b')).toBe('a^&b');
+    expect(quoteForCmdExe('a^b')).toBe('a^^b');
+    expect(quoteForCmdExe('a(b)')).toBe('a^(b^)');
   });
 
-  it('escapes embedded double quotes before wrapping', () => {
-    expect(quoteForCmdExe('a"<b')).toBe('"a\\"<b"');
+  it('does not wrap escaped args in literal quotes', () => {
+    expect(quoteForCmdExe('a"<b')).toBe('a"^<b');
   });
 
   it('the actual chroma dep-override specs become cmd.exe-safe', () => {
@@ -37,10 +37,31 @@ describe('Windows #2696 - cmd.exe metacharacter quoting for chroma-mcp deps', ()
     const specs = ['onnxruntime>=1.20', 'protobuf<7'];
     for (const spec of specs) {
       const quoted = quoteForCmdExe(spec);
-      expect(quoted.startsWith('"')).toBe(true);
-      expect(quoted.endsWith('"')).toBe(true);
-      // The inner content is preserved so uvx still sees the real spec.
-      expect(quoted.slice(1, -1)).toBe(spec);
+      expect(quoted).toContain('^');
+      expect(quoted).not.toContain('"');
+    }
+  });
+
+  it('passes the pinned package through uvx --from before the chroma-mcp executable', () => {
+    const originalMode = process.env.CLAUDE_MEM_CHROMA_MODE;
+    process.env.CLAUDE_MEM_CHROMA_MODE = 'local';
+
+    try {
+      const manager = ChromaMcpManager.getInstance() as unknown as { buildCommandArgs(): string[] };
+      const args = manager.buildCommandArgs();
+      const packageIndex = args.indexOf('chroma-mcp==0.2.6');
+
+      expect(args.slice(packageIndex - 1, packageIndex + 2)).toEqual([
+        '--from',
+        'chroma-mcp==0.2.6',
+        'chroma-mcp',
+      ]);
+    } finally {
+      if (originalMode === undefined) {
+        delete process.env.CLAUDE_MEM_CHROMA_MODE;
+      } else {
+        process.env.CLAUDE_MEM_CHROMA_MODE = originalMode;
+      }
     }
   });
 });
